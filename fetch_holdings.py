@@ -6,10 +6,11 @@ from datetime import datetime
 import yfinance as yf
 
 def download_top_20(ticker_symbol):
-    print(f"Fetching structural components for {ticker_symbol}...")
+    print(f"Initializing data pull for {ticker_symbol}...")
     session = requests.Session()
     session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
     })
     
     # 1. Fetch current top holdings
@@ -17,49 +18,53 @@ def download_top_20(ticker_symbol):
         ticker = yf.Ticker(ticker_symbol, session=session)
         holdings_df = ticker.funds_data.holdings
         if holdings_df is None or holdings_df.empty:
-            raise ValueError("No direct dataset returned.")
+            raise ValueError("Yahoo Finance returned an empty dataset.")
     except Exception as e:
-        print(f"Primary fetch failed ({e}). Shifting to alternative web extractor...")
+        print(f"Primary fetch bypassed ({e}). Trying alternative layout extraction...")
         url = f"https://stockanalysis.com{ticker_symbol.lower()}/holdings/"
         try:
             response = session.get(url, timeout=15)
-            holdings_df = pd.read_html(response.text)[0]
+            tables = pd.read_html(response.text)
+            holdings_df = tables[0]
         except Exception as fallback_err:
-            print(f"Critical Timeout: Source un-extractable. {fallback_err}")
+            print(f"Critical Failure: All data streams blocked. {fallback_err}")
             return
 
-    # Filter to top 20 lines
     holdings_df = holdings_df.head(20)
-    
-    # Standardize column naming based on source format (usually 'Symbol' or 'Ticker')
     symbol_col = 'Symbol' if 'Symbol' in holdings_df.columns else holdings_df.columns[0]
     
-    # 2. Extract historical anchor data for calculations (27 weeks minimum needed)
-    print("Downloading historical reference blocks...")
-    # Fetch benchmark historical series
-    benchmark_hist = yf.download(ticker_symbol, period="1y", interval="1wk", session=session)['Close']
-    
+    # 2. Extract historical anchor data safely
+    print("Gathering reference price data matrix...")
+    try:
+        benchmark_hist = yf.download(ticker_symbol, period="1y", interval="1wk", session=session)
+        if isinstance(benchmark_hist.columns, pd.MultiIndex):
+            benchmark_hist = benchmark_hist['Close'][ticker_symbol]
+        else:
+            benchmark_hist = benchmark_hist['Close']
+    except Exception as b_err:
+        print(f"Could not load historical baseline: {b_err}")
+        return
+        
     relative_strength_list = []
     rel_momentum_list = []
     change_of_mom_list = []
     
     for comp in holdings_df[symbol_col]:
+        symbol_str = str(comp).strip()
         try:
-            # Download asset history
-            asset_hist = yf.download(str(comp).strip(), period="1y", interval="1wk", session=session)['Close']
-            
-            # Align time frames with benchmark via an intersection dataframe
+            asset_hist = yf.download(symbol_str, period="1y", interval="1wk", session=session)
+            if isinstance(asset_hist.columns, pd.MultiIndex):
+                asset_hist = asset_hist['Close'][symbol_str]
+            else:
+                asset_hist = asset_hist['Close']
+                
             merged = pd.DataFrame({'Asset': asset_hist, 'Benchmark': benchmark_hist}).dropna()
             
             if len(merged) >= 27:
-                # Calculate Relative Strength series
                 merged['RS'] = merged['Asset'] / merged['Benchmark']
-                # Calculate Relative Momentum (Shift 26 periods)
                 merged['RM'] = 10 * (merged['RS'] - merged['RS'].shift(26))
-                # Calculate Change of Momentum (Shift 1 period)
                 merged['CM'] = 100 * (merged['RM'] - merged['RM'].shift(1))
                 
-                # Append the latest terminal array values
                 relative_strength_list.append(round(float(merged['RS'].iloc[-1]), 4))
                 rel_momentum_list.append(round(float(merged['RM'].iloc[-1]), 4))
                 change_of_mom_list.append(round(float(merged['CM'].iloc[-1]), 4))
@@ -67,13 +72,12 @@ def download_top_20(ticker_symbol):
                 relative_strength_list.append(np.nan)
                 rel_momentum_list.append(np.nan)
                 change_of_mom_list.append(np.nan)
-        except Exception as err:
-            print(f"Failed math matrix compilation for {comp}: {err}")
+        except Exception:
             relative_strength_list.append(np.nan)
             rel_momentum_list.append(np.nan)
             change_of_mom_list.append(np.nan)
 
-    # Attach computed variables to CSV layout
+    # Attach structural data arrays
     holdings_df['relative_strength'] = relative_strength_list
     holdings_df['rel_Momntum'] = rel_momentum_list
     holdings_df['Change_of_Mom'] = change_of_mom_list
@@ -82,11 +86,9 @@ def download_top_20(ticker_symbol):
     holdings_df['Snapshot_Date'] = runtime_str
     
     os.makedirs("holdings_history", exist_ok=True)
-    file_path = f"holdings_history/{ticker_symbol}_top20_{runtime_str}.csv"
-    holdings_df.to_csv(file_path, index=False)
+    holdings_df.to_csv(f"holdings_history/{ticker_symbol}_top20_{runtime_str}.csv", index=False)
     holdings_df.to_csv(f"{ticker_symbol}_top20_latest.csv", index=False)
-    print(f"Successfully committed metrics to {file_path}")
+    print("Process complete. Saved files generated successfully.")
 
 if __name__ == "__main__":
-    TARGET_TICKER = "SPMO" 
-    download_top_20(TARGET_TICKER)
+    download_top_20("SPMO")
