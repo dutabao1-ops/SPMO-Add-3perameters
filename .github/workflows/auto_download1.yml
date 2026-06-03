@@ -2,29 +2,37 @@ name: Auto Download Portfolio Weights
 
 on:
   schedule:
-    # Runs every Friday at 16:00 UTC (Change to your preference)
+    # Runs every Friday at 16:00 UTC (Afternoon)
     - cron: '0 16 * * 5'
-  # Allows you to manually trigger the download anytime via GitHub UI
-  workflow_dispatch: 
+  workflow_dispatch:
 
 jobs:
   run-scraper:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
+
+    # Forces the environment to use Node 24 and removes the warning message
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    # Explicit read/write permissions for your calculations
+    permissions:
+      contents: write
 
     steps:
     - name: Checkout Repository Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v4.2.2
+      with:
+        # Crucial fix for Exit Code 128: Hands your permissions directly to Git
+        persist-credentials: true
 
     - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
+      uses: actions/setup-python@v5.4.0
 
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pandas yfinance lxml requests html5lib
+        pip install pandas yfinance lxml requests html5lib numpy
 
     - name: Execute Download Script
       run: python fetch_holdings.py
@@ -34,5 +42,5 @@ jobs:
         git config --global user.name "Automated Bot"
         git config --global user.email "bot@github.com"
         git add holdings_history/*.csv *_latest.csv
-        git diff-index --quiet HEAD || git commit -m "Auto-update: Top 20 weights for $(date +'%Y-%m-%d')"
+        git diff-index --quiet HEAD || git commit -m "Auto-update: Top 20 calculations for $(date +'%Y-%m-%d')"
         git push
