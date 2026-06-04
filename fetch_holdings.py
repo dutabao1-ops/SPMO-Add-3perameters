@@ -215,7 +215,8 @@ def download_top_21(ticker_symbol="SPMO"):
     final_df = pd.concat([holdings_df, spmo_row], ignore_index=True)
 
     runtime_str = datetime.now().strftime("%Y-%m-%d")
-final_df["Snapshot_Date"] = runtime_str
+    final_df["Snapshot_Date"] = runtime_str
+
     os.makedirs("holdings_history", exist_ok=True)
 
     final_df.to_csv(
